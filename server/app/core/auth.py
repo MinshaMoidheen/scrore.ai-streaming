@@ -129,19 +129,15 @@ def authorize(roles: list[Role]):
             try:
                 # Create a temporary user object using model_construct to bypass Pydantic validation
                 # This is just for internal use - the actual role validation happened in the proxy
+                from app.db_models.core import Access
                 user = UserModel.model_construct(
                     id=user_id,
-                    name="Teacher",  # Placeholder name
-                    email=None,
+                    username="User",  # Placeholder username
+                    email="temp@example.com",  # Required field
                     password="temp",  # Required field but not used
                     role=roles[0] if roles else Role.TEACHER,  # Use first allowed role
-                    phone=None,
-                    section=None,
-                    courseClass=None,
-                    roll_number=None,
-                    parent_name=None,
-                    parent_phone=None,
-                    address=None,
+                    access=Access.ALL,  # Default access
+                    collaboratingCentreId=None,
                     is_deleted=SoftDelete(status=False),
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
@@ -151,11 +147,15 @@ def authorize(roles: list[Role]):
                 logger.error(f"Failed to create minimal user object: {str(construct_error)}", exc_info=True)
                 # If we can't create a user object, we still need to return something
                 # Create a very basic user object
+                from app.db_models.core import Access
                 user = UserModel.model_construct(
                     id=user_id,
-                    name="User",
+                    username="User",
+                    email="temp@example.com",
                     password="temp",
                     role=roles[0] if roles else Role.TEACHER,
+                    access=Access.ALL,
+                    collaboratingCentreId=None,
                     is_deleted=SoftDelete(status=False),
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),

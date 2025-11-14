@@ -6,6 +6,7 @@ from typing import Optional
 
 from beanie import Document, Link, Indexed
 from pydantic import Field
+from pymongo import IndexModel
 
 from .core import SoftDelete
 from .user import User
@@ -76,10 +77,10 @@ class Section(Document):
     class Settings:
         name = "sections"
         indexes = [
-            [("name", 1), ("courseClass", 1)],
-            {
-                "name": "unique_name_in_courseclass",
-                "unique": True,
-                "partialFilterExpression": {"is_deleted.status": False},
-            },
+            IndexModel(
+                [("name", 1), ("courseClass", 1)],
+                name="unique_name_in_courseclass",
+                unique=True,
+                partialFilterExpression={"is_deleted.status": False},
+            ),
         ]

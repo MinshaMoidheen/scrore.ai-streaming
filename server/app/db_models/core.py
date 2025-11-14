@@ -28,6 +28,12 @@ class Role(str, Enum):
     TEACHER = "teacher"
     USER = "user"
 
+class Access(str, Enum):
+    """Enumeration for user access levels."""
+    CENTRE = "centre"
+    OWN = "own"
+    ALL = "all"
+
 class AttendanceStatus(str, Enum):
     """Enumeration for attendance status."""
     PRESENT = "present"

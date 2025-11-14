@@ -5,6 +5,7 @@ from typing import List, Optional, ForwardRef
 
 from beanie import Document, Link
 from pydantic import Field
+from pymongo import IndexModel
 
 from .core import SoftDelete, AttendanceStatus
 
@@ -60,8 +61,11 @@ class Attendance(Document):
     class Settings:
         name = "attendances"
         indexes = [
-            [("student_id", 1), ("date", 1)],
-            {"name": "unique_attendance_per_student_date", "unique": True},
+            IndexModel(
+                [("student_id", 1), ("date", 1)],
+                name="unique_attendance_per_student_date",
+                unique=True,
+            ),
         ]
 
 
@@ -90,10 +94,10 @@ class AttendanceRecord(Document):
     class Settings:
         name = "attendance_records"
         indexes = [
-            [("courseClass", 1), ("section", 1), ("date", 1)],
-            {
-                "name": "unique_record_per_courseclass_section_date",
-                "unique": True,
-                "partialFilterExpression": {"is_deleted.status": False},
-            },
+            IndexModel(
+                [("courseClass", 1), ("section", 1), ("date", 1)],
+                name="unique_record_per_courseclass_section_date",
+                unique=True,
+                partialFilterExpression={"is_deleted.status": False},
+            ),
         ]

@@ -197,15 +197,17 @@ async def start_recording_endpoint(
             # The section might not be synced to the streaming server's database
             section = None
 
-        # Check if user belongs to this section
-        if section and current_user.section:
-            if current_user.section.id != section_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail={"code": "AuthorizationError", "message": "You are not authorized to record this class."}
-                )
-        else:
-            # If section doesn't exist, log a warning but allow recording
+        # Authorization: Only teachers with appropriate access can record
+        # Teachers with 'all' or 'centre' access can record any section
+        # Teachers with 'own' access would need additional logic to determine ownership
+        if current_user.role != Role.TEACHER:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "AuthorizationError", "message": "Only teachers can record classes."}
+            )
+        
+        # If section doesn't exist, log a warning but allow recording
+        if not section:
             logger.info(f"Recording allowed for section {section_id} without section validation (section may not exist in streaming server DB)")
 
         videos_dir = "videos_recorded"

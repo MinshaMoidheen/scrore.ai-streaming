@@ -1,6 +1,6 @@
 # models/__init__.py
 
-from .core import SoftDelete, Role, AttendanceStatus
+from .core import SoftDelete, Role, Access, AttendanceStatus
 from .academic import CourseClass, Section, Subject
 from .user import User
 from .token import Token
@@ -20,6 +20,7 @@ __all__ = [
     "RecordedVideo",
     "SoftDelete",
     "Role",
+    "Access",
     "AttendanceStatus",
 ]
 

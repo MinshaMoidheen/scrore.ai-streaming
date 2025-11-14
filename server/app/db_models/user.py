@@ -1,49 +1,46 @@
 # models/user.py
 
 from datetime import datetime, timezone
-from typing import Optional, ForwardRef
+from typing import Optional
 
-from beanie import Document, Link, Indexed
+from beanie import Document, Link, Indexed, PydanticObjectId
 from pydantic import EmailStr, Field, model_validator
 
-from .core import Role, SoftDelete, UserRef
+from .core import Role, Access, SoftDelete
 
 # --- Type Forward References ---
-SectionRef = ForwardRef("Section")
-CourseClassRef = ForwardRef("CourseClass")
+# (Removed SectionRef and CourseClassRef as they're no longer used)
 
 # --- Beanie Document Models ---
 
 
 class User(Document):
-    """Represents a user, who can be a superadmin, admin, or student."""
-    name: str = Field(max_length=50)
-    email: Optional[Indexed(EmailStr, unique=True)] = Field(default=None, max_length=50)
+    """Represents a user in the system."""
+    username: str = Field(max_length=20)
+    email: Indexed(EmailStr, unique=True) = Field(max_length=50)
     password: str
     role: Role
-    phone: Optional[str] = Field(default=None, max_length=15)
-    section: Optional[Link[SectionRef]] = None
-    courseClass: Optional[Link[CourseClassRef]] = None
-    roll_number: Optional[str] = Field(default=None, max_length=20)
-    parent_name: Optional[str] = Field(default=None, max_length=50)
-    parent_phone: Optional[str] = Field(default=None, max_length=15)
-    address: Optional[str] = Field(default=None, max_length=200)
+    access: Access = Field(default=Access.CENTRE)
+    collaboratingCentreId: Optional[PydanticObjectId] = None
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
     created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
 
     @model_validator(mode="after")
-    def validate_role_specific_fields(self):
-        if self.role == Role.USER and (
-            not self.roll_number or not self.courseClass or not self.section
-        ):
-            raise ValueError("Roll number, courseClass, and section are required for users")
-        if self.role in (Role.ADMIN, Role.TEACHER) and (
-            not self.courseClass or not self.section
-        ):
-            raise ValueError(
-                "CourseClass and section are required for admins and teachers"
-            )
+    def validate_access_for_role(self):
+        """Validate that access level is appropriate for the user's role."""
+        if self.role == Role.SUPERADMIN:
+            if self.access != Access.ALL:
+                raise ValueError('Superadmin role can only have "all" access')
+        elif self.role == Role.ADMIN:
+            if self.access not in (Access.ALL, Access.CENTRE):
+                raise ValueError('Admin role can only have "all" or "centre" access')
+        elif self.role == Role.USER:
+            if self.access not in (Access.ALL, Access.CENTRE, Access.OWN):
+                raise ValueError('User role can have "all", "centre", or "own" access')
+        elif self.role == Role.TEACHER:
+            if self.access not in (Access.ALL, Access.CENTRE, Access.OWN):
+                raise ValueError('Teacher role can have "all", "centre", or "own" access')
         return self
 
     async def soft_delete(self, deleted_by: "User"):
@@ -56,11 +53,4 @@ class User(Document):
 
     class Settings:
         name = "users"
-        indexes = [
-            [("roll_number", 1), ("courseClass", 1), ("section", 1)],
-            {
-                "name": "unique_roll_in_courseclass_section",
-                "unique": True,
-                "partialFilterExpression": {"role": "user", "is_deleted.status": False},
-            },
-        ]
+        indexes = []
