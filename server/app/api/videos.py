@@ -27,14 +27,26 @@ async def list_recorded_videos(
 ):
     """
     List recorded videos for a specific section with date filtering and pagination.
+    The section_id parameter can be either a section ID or a video ID.
+    If it's a video ID, the endpoint will find the section from that video.
     """
-    # Find section and exclude soft-deleted ones
+    # First try to find the section
     section = await Section.get(section_id)
-    print("section", section)
+    
+    # If section not found, try to find a video with this ID and get its section
+    if not section:
+        video = await RecordedVideo.get(section_id, fetch_links=True)
+        if video and video.section:
+            section = await Section.get(video.section.id, fetch_links=True)
+    
+    # Check if section exists and is not soft-deleted
     if not section or section.is_deleted.status:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Section not found"
         )
+    
+    # Use the section's ID for querying videos
+    actual_section_id = section.id
 
     # Authorization based on role and access level
     # Superadmin and admin with 'all' access can view any section
@@ -44,7 +56,7 @@ async def list_recorded_videos(
         # This would need additional logic to determine ownership
         pass
 
-    query = RecordedVideo.find(RecordedVideo.section.id == section_id)
+    query = RecordedVideo.find(RecordedVideo.section.id == actual_section_id)
     if date:
         query = query.find(
             RecordedVideo.created_at >= date,
