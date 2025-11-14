@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.core.auth import authorize
-from app.db_models.academic import Division
+from app.db_models.academic import Section
 from app.db_models.core import Role
 from app.db_models.recording import RecordedVideo
 from app.db_models.user import User
@@ -15,9 +15,9 @@ from app.db_models.user import User
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
 
-@router.get("/{division_id}", response_model=List[RecordedVideo])
+@router.get("/{section_id}", response_model=List[RecordedVideo])
 async def list_recorded_videos(
-    division_id: PydanticObjectId,
+    section_id: PydanticObjectId,
     date: Optional[datetime] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -26,21 +26,21 @@ async def list_recorded_videos(
     ),
 ):
     """
-    List recorded videos for a specific division with date filtering and pagination.
+    List recorded videos for a specific section with date filtering and pagination.
     """
-    division = await Division.get(division_id)
-    if not division:
+    section = await Section.get(section_id)
+    if not section:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Division not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Section not found"
         )
 
-    if current_user.division.id != division_id:
+    if not current_user.section or current_user.section.id != section_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not authorized to view recordings for this division",
+            detail="You are not authorized to view recordings for this section",
         )
 
-    query = RecordedVideo.find(RecordedVideo.division.id == division_id)
+    query = RecordedVideo.find(RecordedVideo.section.id == section_id)
     if date:
         query = query.find(
             RecordedVideo.created_at >= date,
@@ -73,7 +73,7 @@ async def stream_video(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video not found"
         )
 
-    if current_user.division.id != video.division.id:
+    if not current_user.section or current_user.section.id != video.section.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to view this recording",

@@ -136,8 +136,8 @@ def authorize(roles: list[Role]):
                     password="temp",  # Required field but not used
                     role=roles[0] if roles else Role.TEACHER,  # Use first allowed role
                     phone=None,
-                    division=None,
-                    class_id=None,
+                    section=None,
+                    courseClass=None,
                     roll_number=None,
                     parent_name=None,
                     parent_phone=None,

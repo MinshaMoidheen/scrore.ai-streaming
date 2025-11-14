@@ -10,8 +10,8 @@ from pydantic import BaseModel
 # --- Type Forward References for relationships ---
 # Define forward references for models that will be imported later.
 UserRef = ForwardRef("User")
-ClassRef = ForwardRef("Class")
-DivisionRef = ForwardRef("Division")
+CourseClassRef = ForwardRef("CourseClass")
+SectionRef = ForwardRef("Section")
 
 # --- Reusable Nested Pydantic Models & Enums ---
 

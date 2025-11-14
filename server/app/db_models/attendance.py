@@ -10,8 +10,8 @@ from .core import SoftDelete, AttendanceStatus
 
 # --- Type Forward References ---
 UserRef = ForwardRef("User")
-ClassRef = ForwardRef("Class")
-DivisionRef = ForwardRef("Division")
+CourseClassRef = ForwardRef("CourseClass")
+SectionRef = ForwardRef("Section")
 AttendanceRef = ForwardRef("Attendance")
 User = ForwardRef("User")
 
@@ -19,8 +19,8 @@ User = ForwardRef("User")
 
 class Schedule(Document):
     """Represents a scheduled class or event."""
-    class_id: Link[ClassRef] = Field(alias="class")
-    division: Link[DivisionRef]
+    courseClass: Link[CourseClassRef]
+    section: Link[SectionRef]
     start_time: str
     end_time: str
     topic: str = Field(max_length=100)
@@ -48,8 +48,8 @@ class Attendance(Document):
     """Represents a single attendance entry for a student on a specific date."""
     student_id: Link[UserRef]
     student_name: str = Field(max_length=50)
-    class_id: Link[ClassRef] = Field(alias="class")
-    division: Link[DivisionRef]
+    courseClass: Link[CourseClassRef]
+    section: Link[SectionRef]
     date: datetime
     status: AttendanceStatus
     remarks: Optional[str] = Field(default=None, max_length=200)
@@ -66,10 +66,10 @@ class Attendance(Document):
 
 
 class AttendanceRecord(Document):
-    """A summary record of attendance for a specific class/division on a given date."""
+    """A summary record of attendance for a specific courseClass/section on a given date."""
     date: datetime
-    class_id: Link[ClassRef] = Field(alias="class")
-    division: Link[DivisionRef]
+    courseClass: Link[CourseClassRef]
+    section: Link[SectionRef]
     students: List[Link[AttendanceRef]]
     total_students: int = Field(ge=0)
     present_count: int = Field(ge=0)
@@ -90,9 +90,9 @@ class AttendanceRecord(Document):
     class Settings:
         name = "attendance_records"
         indexes = [
-            [("class_id", 1), ("division", 1), ("date", 1)],
+            [("courseClass", 1), ("section", 1), ("date", 1)],
             {
-                "name": "unique_record_per_class_div_date",
+                "name": "unique_record_per_courseclass_section_date",
                 "unique": True,
                 "partialFilterExpression": {"is_deleted.status": False},
             },

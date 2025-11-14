@@ -117,3 +117,6 @@ static/docs/
 
 static/
 media/
+
+# Recorded videos
+videos_recorded/

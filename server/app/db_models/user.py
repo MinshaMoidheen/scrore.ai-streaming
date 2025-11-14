@@ -9,8 +9,8 @@ from pydantic import EmailStr, Field, model_validator
 from .core import Role, SoftDelete, UserRef
 
 # --- Type Forward References ---
-DivisionRef = ForwardRef("Division")
-ClassRef = ForwardRef("Class")
+SectionRef = ForwardRef("Section")
+CourseClassRef = ForwardRef("CourseClass")
 
 # --- Beanie Document Models ---
 
@@ -22,8 +22,8 @@ class User(Document):
     password: str
     role: Role
     phone: Optional[str] = Field(default=None, max_length=15)
-    division: Optional[Link[DivisionRef]] = None
-    class_id: Optional[Link[ClassRef]] = Field(default=None, alias="class")
+    section: Optional[Link[SectionRef]] = None
+    courseClass: Optional[Link[CourseClassRef]] = None
     roll_number: Optional[str] = Field(default=None, max_length=20)
     parent_name: Optional[str] = Field(default=None, max_length=50)
     parent_phone: Optional[str] = Field(default=None, max_length=15)
@@ -35,14 +35,14 @@ class User(Document):
     @model_validator(mode="after")
     def validate_role_specific_fields(self):
         if self.role == Role.USER and (
-            not self.roll_number or not self.class_id or not self.division
+            not self.roll_number or not self.courseClass or not self.section
         ):
-            raise ValueError("Roll number, class, and division are required for users")
+            raise ValueError("Roll number, courseClass, and section are required for users")
         if self.role in (Role.ADMIN, Role.TEACHER) and (
-            not self.class_id or not self.division
+            not self.courseClass or not self.section
         ):
             raise ValueError(
-                "Class and division are required for admins and teachers"
+                "CourseClass and section are required for admins and teachers"
             )
         return self
 
@@ -57,9 +57,9 @@ class User(Document):
     class Settings:
         name = "users"
         indexes = [
-            [("roll_number", 1), ("class_id", 1), ("division", 1)],
+            [("roll_number", 1), ("courseClass", 1), ("section", 1)],
             {
-                "name": "unique_roll_in_class_division",
+                "name": "unique_roll_in_courseclass_section",
                 "unique": True,
                 "partialFilterExpression": {"role": "user", "is_deleted.status": False},
             },

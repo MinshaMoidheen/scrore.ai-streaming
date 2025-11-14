@@ -1,7 +1,7 @@
 # models/__init__.py
 
 from .core import SoftDelete, Role, AttendanceStatus
-from .academic import Class, Division
+from .academic import CourseClass, Section, Subject
 from .user import User
 from .token import Token
 from .attendance import Schedule, Attendance, AttendanceRecord
@@ -11,8 +11,9 @@ from .recording import RecordedVideo
 __all__ = [
     "User",
     "Token",
-    "Class",
-    "Division",
+    "CourseClass",
+    "Section",
+    "Subject",
     "Schedule",
     "Attendance",
     "AttendanceRecord",
@@ -27,8 +28,9 @@ __all__ = [
 # that are defined in different files.
 SoftDelete.model_rebuild()
 Token.model_rebuild()
-Class.model_rebuild()
-Division.model_rebuild()
+CourseClass.model_rebuild()
+Section.model_rebuild()
+Subject.model_rebuild()
 User.model_rebuild()
 Schedule.model_rebuild()
 Attendance.model_rebuild()

@@ -11,7 +11,7 @@ from typing import Dict, Optional, Set
 from beanie import PydanticObjectId
 
 from app.db_models.user import User
-from app.db_models.academic import Division
+from app.db_models.academic import Section
 from app.db_models.core import Role
 from app.db_models.recording import RecordedVideo
 from app.core.auth import authorize
@@ -24,12 +24,12 @@ sessions: Dict[str, "RecordingSession"] = {}
 
 
 class RecordingSession:
-    def __init__(self, session_id: str, file_path: str, division_id: PydanticObjectId):
+    def __init__(self, session_id: str, file_path: str, section_id: PydanticObjectId):
         self.session_id = session_id
         self.pc = RTCPeerConnection()
         self.recorder = None
         self.file_path = file_path
-        self.division_id = division_id
+        self.section_id = section_id
         self.video_tracks: Dict[str, MediaStreamTrack] = {}
         self.audio_tracks: Set[MediaStreamTrack] = set()
         self.compositor: Optional[CompositingTrack] = None
@@ -172,59 +172,41 @@ async def start_recording_endpoint(
     current_user: User = Depends(authorize([Role.TEACHER])),
 ):
     try:
-        division_id = offer.get("division_id")
-        if not division_id:
+        section_id = offer.get("section_id") or offer.get("division_id")  # Support both for backward compatibility
+        if not section_id:
             raise HTTPException(
                 status_code=400, 
-                detail={"code": "ValidationError", "message": "Division ID is required."}
+                detail={"code": "ValidationError", "message": "Section ID is required."}
             )
 
-        # Try to fetch division, but don't fail if it doesn't exist
-        # The division might not be in the streaming server's database
-        division = None
-        teacher_id = None
+        # Try to fetch section, but don't fail if it doesn't exist
+        # The section might not be in the streaming server's database
+        section = None
         
         try:
-            division = await Division.get(PydanticObjectId(division_id))
-            if division:
-                # Fetch the teacher link before accessing its properties
-                try:
-                    await division.fetch_all_links()
-                    if division.teacher:
-                        teacher_id = division.teacher.id
-                except Exception as e:
-                    logger.warning(f"Error fetching division teacher link: {str(e)}")
-                    # If teacher link fetch fails, try to get the ID directly
-                    if division.teacher:
-                        try:
-                            if hasattr(division.teacher, 'id'):
-                                teacher_id = division.teacher.id
-                            elif hasattr(division.teacher, '__str__'):
-                                teacher_id = str(division.teacher)
-                        except Exception:
-                            teacher_id = None
+            section = await Section.get(PydanticObjectId(section_id))
         except ValueError as e:
-            logger.error(f"Invalid division_id format {division_id}: {str(e)}")
+            logger.error(f"Invalid section_id format {section_id}: {str(e)}")
             raise HTTPException(
                 status_code=400,
-                detail={"code": "ValidationError", "message": f"Invalid division ID format: {str(e)}"}
+                detail={"code": "ValidationError", "message": f"Invalid section ID format: {str(e)}"}
             )
         except Exception as e:
-            logger.warning(f"Division {division_id} not found in database or error fetching: {str(e)}")
-            # Don't fail if division doesn't exist - allow recording to proceed
-            # The division might not be synced to the streaming server's database
-            division = None
+            logger.warning(f"Section {section_id} not found in database or error fetching: {str(e)}")
+            # Don't fail if section doesn't exist - allow recording to proceed
+            # The section might not be synced to the streaming server's database
+            section = None
 
-        # Only check teacher authorization if division exists and has a teacher
-        if division and division.teacher and teacher_id:
-            if teacher_id != current_user.id:
+        # Check if user belongs to this section
+        if section and current_user.section:
+            if current_user.section.id != section_id:
                 raise HTTPException(
                     status_code=403,
                     detail={"code": "AuthorizationError", "message": "You are not authorized to record this class."}
                 )
         else:
-            # If division doesn't exist or has no teacher, log a warning but allow recording
-            logger.info(f"Recording allowed for division {division_id} without division validation (division may not exist in streaming server DB)")
+            # If section doesn't exist, log a warning but allow recording
+            logger.info(f"Recording allowed for section {section_id} without section validation (section may not exist in streaming server DB)")
 
         videos_dir = "videos_recorded"
         os.makedirs(videos_dir, exist_ok=True)
@@ -237,7 +219,7 @@ async def start_recording_endpoint(
         )
         try:
             session = RecordingSession(
-                session_id, file_path, division_id=PydanticObjectId(division_id)
+                session_id, file_path, section_id=PydanticObjectId(section_id)
             )
             sessions[session_id] = session
 
@@ -283,7 +265,7 @@ async def stop_recording_endpoint(data: dict = Body(...)):
     # Create a new RecordedVideo document
     video_doc = RecordedVideo(
         filename=os.path.basename(session.file_path),
-        division=session.division_id,
+        section=session.section_id,
     )
     await video_doc.insert()
 
