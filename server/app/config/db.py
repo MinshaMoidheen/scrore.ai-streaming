@@ -4,6 +4,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 
 from app.config.env_settings import settings
+from app.db_models import (
+    RecordedVideo,
+)
 
 if not settings.MONGO_URI:
     raise ValueError("MONGO_URI is empty or not set")
@@ -24,5 +27,6 @@ async def init_db():
     await init_beanie(
         database=db,
         document_models=[
+            RecordedVideo,
         ]
     )
