@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body, HTTPException, Depends
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, MediaStreamError
 from aiortc.contrib.media import MediaRecorder
 from ..api.resizing import AspectRatioPreservingTrack
 from ..api.compositing import CompositingTrack, AudioMixerTrack
@@ -7,8 +7,10 @@ import uuid
 import os
 import asyncio
 import logging
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, cast
 from beanie import PydanticObjectId
+import av
+from av import AudioFrame, VideoFrame
 
 from app.db_models.user import User
 from app.db_models.academic import Section
@@ -21,6 +23,112 @@ logger = logging.getLogger("recording_pipeline")
 logging.basicConfig(level=logging.INFO)
 
 sessions: Dict[str, "RecordingSession"] = {}
+
+
+class WebMMediaRecorder:
+    """
+    Custom MediaRecorder for WebM format with proper codecs:
+    - Video: VP9 (libvpx-vp9) - High quality codec
+    - Audio: Opus (libopus) - High quality audio
+    """
+    
+    class MediaRecorderContext:
+        def __init__(self, stream):
+            self.stream = stream
+            self.task: Optional[asyncio.Task] = None
+            self.started = False
+    
+    def __init__(self, file_path: str, options: Optional[dict] = None):
+        self.file_path = file_path
+        self.options = options or {}
+        
+        # Open WebM container
+        self.__container = av.open(
+            file=file_path,
+            format="webm",
+            mode="w",
+            options=self.options
+        )
+        self.__tracks: Dict[MediaStreamTrack, WebMMediaRecorder.MediaRecorderContext] = {}
+    
+    def addTrack(self, track: MediaStreamTrack) -> None:
+        """Add a track to be recorded with WebM-appropriate codecs."""
+        if track.kind == "audio":
+            # Use Opus codec for WebM audio - high quality
+            codec_name = "libopus"
+            stream = cast(av.AudioStream, self.__container.add_stream(codec_name))
+        else:
+            # Use VP9 codec for WebM video - better quality than VP8
+            codec_name = "libvpx-vp9"
+            stream = cast(av.VideoStream, self.__container.add_stream(codec_name, rate=30))
+            stream.pix_fmt = "yuv420p"
+        
+        self.__tracks[track] = self.MediaRecorderContext(stream)
+        logger.info(f"Added {track.kind} track to WebM recorder with codec: {codec_name}")
+    
+    async def start(self) -> None:
+        """Start recording."""
+        for track, context in self.__tracks.items():
+            if context.task is None:
+                context.task = asyncio.ensure_future(self.__run_track(track, context))
+        logger.info("WebM MediaRecorder started")
+    
+    async def stop(self) -> None:
+        """Stop recording and finalize file."""
+        if self.__container is not None:
+            logger.info("Stopping WebM MediaRecorder and finalizing file...")
+            for track, context in self.__tracks.items():
+                if context.task is not None:
+                    context.task.cancel()
+                    try:
+                        await context.task
+                    except asyncio.CancelledError:
+                        pass
+                    context.task = None
+                    # Flush remaining frames
+                    try:
+                        for packet in context.stream.encode(None):
+                            self.__container.mux(packet)
+                    except Exception as e:
+                        logger.warning(f"Error flushing {track.kind} stream: {e}")
+            
+            self.__tracks = {}
+            self.__container.close()
+            self.__container = None
+            logger.info(f"WebM MediaRecorder stopped. File saved to: {self.file_path}")
+    
+    async def __run_track(
+        self, track: MediaStreamTrack, context: "WebMMediaRecorder.MediaRecorderContext"
+    ) -> None:
+        """Process frames from track and encode them."""
+        try:
+            while True:
+                try:
+                    frame = await track.recv()
+                except MediaStreamError:
+                    logger.info(f"Track {track.kind} ended")
+                    return
+                
+                if not isinstance(frame, (AudioFrame, VideoFrame)):
+                    logger.warning(f"Unexpected frame type: {type(frame)}")
+                    continue
+                
+                if not context.started:
+                    # Set output dimensions for video
+                    if isinstance(context.stream, av.VideoStream) and isinstance(frame, VideoFrame):
+                        context.stream.width = frame.width
+                        context.stream.height = frame.height
+                    context.started = True
+                    logger.info(f"Started encoding {track.kind} track: {frame.width if isinstance(frame, VideoFrame) else 'audio'}x{frame.height if isinstance(frame, VideoFrame) else 'N/A'}")
+                
+                # Encode and mux frames
+                try:
+                    for packet in context.stream.encode(frame):
+                        self.__container.mux(packet)
+                except Exception as e:
+                    logger.error(f"Error encoding {track.kind} frame: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Error in track processing: {e}", exc_info=True)
 
 
 class RecordingSession:
@@ -108,8 +216,18 @@ class RecordingSession:
         # Initialize audio mixer with existing tracks (could be empty initially)
         self.audio_mixer = AudioMixerTrack(tracks=self.audio_tracks.copy())
 
-        options = {"crf": "18", "preset": "ultrafast", "tune": "zerolatency"}
-        self.recorder = MediaRecorder(self.file_path, options=options)
+        # WebM encoding options for high quality VP9/Opus
+        # VP9 quality: CRF 0-63 (lower = better, 15-25 is high quality range)
+        # For maximum quality: use CRF 15 with high bitrate cap
+        options = {
+            "crf": "15",  # Very high quality (0-63 scale, lower is better)
+            "b:v": "10M",  # High video bitrate cap for excellent quality
+            "maxrate": "12M",  # Maximum bitrate for quality spikes
+            "bufsize": "20M",  # Buffer size for rate control
+            "b:a": "256k",  # High audio bitrate for excellent quality
+            "threads": "0",  # Auto-detect optimal thread count
+        }
+        self.recorder = WebMMediaRecorder(self.file_path, options=options)
 
         self.recorder.addTrack(self.compositor)
         self.recorder.addTrack(self.audio_mixer)
@@ -169,25 +287,32 @@ class RecordingSession:
 
         await asyncio.gather(*tasks, return_exceptions=True)
         
+        # Wait a moment for file to be fully written
+        await asyncio.sleep(0.5)
+        
         # Save the recorded video to database after recording is stopped
         try:
-            # Check if the file exists before saving to database
+            # Check if the file exists and has content before saving to database
             if os.path.exists(self.file_path):
-                filename = os.path.basename(self.file_path)
-                logger.info(f"Saving recorded video to database: {filename} for section {self.section_id}")
-                
-                # Create a Link from the section_id
-                section_link = Section.link_from_id(self.section_id)
-                
-                # Create and save RecordedVideo document
-                video_doc = RecordedVideo(
-                    filename=filename,
-                    section=section_link,
-                )
-                await video_doc.insert()
-                logger.info(f"Successfully saved recorded video {filename} to database.")
+                file_size = os.path.getsize(self.file_path)
+                if file_size > 0:
+                    filename = os.path.basename(self.file_path)
+                    logger.info(f"Saving recorded video to database: {filename} (size: {file_size} bytes) for section {self.section_id}")
+                    
+                    # Create a Link from the section_id
+                    section_link = Section.link_from_id(self.section_id)
+                    
+                    # Create and save RecordedVideo document
+                    video_doc = RecordedVideo(
+                        filename=filename,
+                        section=section_link,
+                    )
+                    await video_doc.insert()
+                    logger.info(f"Successfully saved recorded video {filename} to database.")
+                else:
+                    logger.warning(f"Video file {self.file_path} exists but is empty (0 bytes), skipping database save.")
             else:
-                logger.warning(f"Video file {self.file_path} does not exist, skipping database save.")
+                logger.error(f"Video file {self.file_path} does not exist after recording stopped. Recording may have failed.")
         except Exception as e:
             logger.error(f"Error saving recorded video to database: {str(e)}", exc_info=True)
         
@@ -244,7 +369,7 @@ async def start_recording_endpoint(
         os.makedirs(videos_dir, exist_ok=True)
 
         session_id = str(uuid.uuid4())
-        file_path = os.path.join(videos_dir, f"{session_id}.mkv")
+        file_path = os.path.join(videos_dir, f"{session_id}.webm")
 
         logger.info(
             f"Starting new recording session {session_id}. File will be saved to {file_path}"

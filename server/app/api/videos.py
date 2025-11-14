@@ -145,7 +145,7 @@ async def stream_video(
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(end - start + 1),
-            "Content-Type": "video/mkv",
+            "Content-Type": "video/webm",
         }
         return StreamingResponse(
             aiter_file(video_path, start, end), status_code=206, headers=headers
@@ -153,7 +153,7 @@ async def stream_video(
     else:
         headers = {
             "Content-Length": str(file_size),
-            "Content-Type": "video/mkv",
+            "Content-Type": "video/webm",
         }
         return StreamingResponse(
             aiter_file(video_path, 0, file_size - 1), headers=headers
