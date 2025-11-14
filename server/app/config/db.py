@@ -5,6 +5,9 @@ from beanie import init_beanie
 
 from app.config.env_settings import settings
 from app.db_models import (
+    User,
+    Section,
+    CourseClass,
     RecordedVideo,
 )
 
@@ -27,6 +30,9 @@ async def init_db():
     await init_beanie(
         database=db,
         document_models=[
+            User,
+            CourseClass,
+            Section,
             RecordedVideo,
         ]
     )
