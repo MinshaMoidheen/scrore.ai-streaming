@@ -30,8 +30,8 @@ class Schedule(Document):
     teacher_name: Optional[str] = Field(default=None, max_length=50)
     stream_ended: bool = False
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def soft_delete(self, deleted_by: "User"):
         self.is_deleted = SoftDelete(
@@ -55,8 +55,8 @@ class Attendance(Document):
     status: AttendanceStatus
     remarks: Optional[str] = Field(default=None, max_length=200)
     marked_by: Optional[Link[UserRef]] = None
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "attendances"
@@ -80,8 +80,8 @@ class AttendanceRecord(Document):
     absent_count: int = Field(ge=0)
     late_count: int = Field(ge=0)
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def soft_delete(self, deleted_by: "User"):
         self.is_deleted = SoftDelete(

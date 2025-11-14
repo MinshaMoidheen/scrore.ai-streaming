@@ -22,8 +22,8 @@ class CourseClass(Document):
     name: Indexed(str, unique=True) = Field(max_length=50)
     description: Optional[str] = Field(default=None, max_length=200)
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def soft_delete(self, deleted_by: "User"):
         self.is_deleted = SoftDelete(
@@ -43,8 +43,8 @@ class Subject(Document):
     code: Optional[str] = Field(default=None, max_length=20)
     description: Optional[str] = Field(default=None, max_length=200)
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def soft_delete(self, deleted_by: "User"):
         self.is_deleted = SoftDelete(
@@ -63,8 +63,8 @@ class Section(Document):
     name: str = Field(max_length=20)
     courseClass: Link[CourseClassRef]
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def soft_delete(self, deleted_by: "User"):
         self.is_deleted = SoftDelete(

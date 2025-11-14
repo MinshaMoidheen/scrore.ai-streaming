@@ -23,8 +23,8 @@ class User(Document):
     access: Access = Field(default=Access.CENTRE)
     collaboratingCentreId: Optional[PydanticObjectId] = None
     is_deleted: SoftDelete = Field(default_factory=SoftDelete)
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")
     def validate_access_for_role(self):

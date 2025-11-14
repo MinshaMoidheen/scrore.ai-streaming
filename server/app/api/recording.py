@@ -35,6 +35,7 @@ class RecordingSession:
         self.compositor: Optional[CompositingTrack] = None
         self.audio_mixer: Optional[AudioMixerTrack] = None
         self.__recorder_started = False
+        self.__stopped = False
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
@@ -144,10 +145,16 @@ class RecordingSession:
         }
 
     async def stop(self):
-        if self.session_id not in sessions:
+        # Prevent duplicate stops
+        if self.__stopped:
+            logger.info(f"Session {self.session_id} already stopped, skipping.")
             return
+        
+        self.__stopped = True
 
-        del sessions[self.session_id]
+        # Remove from sessions dictionary first to prevent race conditions
+        if self.session_id in sessions:
+            del sessions[self.session_id]
 
         tasks = []
         if self.recorder and (self.__recorder_started or hasattr(self, '_recorder_started')):
@@ -161,6 +168,29 @@ class RecordingSession:
         tasks.append(self.pc.close())
 
         await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Save the recorded video to database after recording is stopped
+        try:
+            # Check if the file exists before saving to database
+            if os.path.exists(self.file_path):
+                filename = os.path.basename(self.file_path)
+                logger.info(f"Saving recorded video to database: {filename} for section {self.section_id}")
+                
+                # Create a Link from the section_id
+                section_link = Section.link_from_id(self.section_id)
+                
+                # Create and save RecordedVideo document
+                video_doc = RecordedVideo(
+                    filename=filename,
+                    section=section_link,
+                )
+                await video_doc.insert()
+                logger.info(f"Successfully saved recorded video {filename} to database.")
+            else:
+                logger.warning(f"Video file {self.file_path} does not exist, skipping database save.")
+        except Exception as e:
+            logger.error(f"Error saving recorded video to database: {str(e)}", exc_info=True)
+        
         logger.info(
             f"Recording session {self.session_id} stopped and cleaned up."
         )
@@ -259,16 +289,12 @@ async def stop_recording_endpoint(data: dict = Body(...)):
     session = sessions.get(session_id)
 
     if not session:
+        # Session might have already been stopped automatically (e.g., on disconnect)
+        logger.warning(f"Recording session {session_id} not found. It may have already been stopped.")
         raise HTTPException(status_code=404, detail="Recording session not found.")
 
     logger.info(f"Request to stop recording session {session_id}")
     await session.stop()
-
-    # Create a new RecordedVideo document
-    video_doc = RecordedVideo(
-        filename=os.path.basename(session.file_path),
-        section=session.section_id,
-    )
-    await video_doc.insert()
+    # Note: RecordedVideo is now saved in the stop() method
 
     return {"message": f"Recording session {session_id} stopped."}

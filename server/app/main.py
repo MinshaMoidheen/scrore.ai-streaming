@@ -13,6 +13,9 @@ from app.config.origins import origins
 
 logger = logging.getLogger(__name__)
 
+# Log CORS configuration on startup
+logger.info(f"CORS allowed origins: {origins}")
+
 def custom_generate_unique_id(route: APIRoute):
     '''Unique ID for routes'''
     if route.tags and len(route.tags) > 0:
@@ -52,18 +55,43 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         detail = {"code": "HTTPException", "message": str(exc.detail)}
     
     logger.error(f"HTTPException: {exc.status_code} - {detail}")
+    
+    # Get the origin from the request to add CORS headers
+    origin = request.headers.get("origin")
+    headers = dict(exc.headers) if exc.headers else {}
+    
+    # Add CORS headers if origin is in allowed origins
+    if origin and origin in origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Access-Control-Allow-Methods"] = "*"
+        headers["Access-Control-Allow-Headers"] = "*"
+    
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": detail},
-        headers=exc.headers
+        headers=headers
     )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    
+    # Get the origin from the request to add CORS headers
+    origin = request.headers.get("origin")
+    headers = {}
+    
+    # Add CORS headers if origin is in allowed origins
+    if origin and origin in origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Access-Control-Allow-Methods"] = "*"
+        headers["Access-Control-Allow-Headers"] = "*"
+    
     return JSONResponse(
         status_code=500,
-        content={"detail": {"code": "InternalServerError", "message": str(exc)}}
+        content={"detail": {"code": "InternalServerError", "message": str(exc)}},
+        headers=headers
     )
 
 app.include_router(websocket.router)

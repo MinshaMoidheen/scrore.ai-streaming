@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,6 +12,8 @@ from app.db_models.academic import Section
 from app.db_models.core import Role, Access
 from app.db_models.recording import RecordedVideo
 from app.db_models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
@@ -62,14 +65,35 @@ async def list_recorded_videos(
             RecordedVideo.created_at >= date,
             RecordedVideo.created_at < date.replace(hour=23, minute=59, second=59),
         )
-    videos = (
-        await query.sort([("created_at", -1)])
-        .skip((page - 1) * page_size)
-        .limit(page_size)
-        .to_list()
-    )
+    try:
+        videos = (
+            await query.sort([("created_at", -1)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+            .to_list()
+        )
+        
+        # Fetch links for all videos to ensure section is properly loaded
+        # This is important for proper serialization in the response
+        for video in videos:
+            try:
+                # Try to fetch the section link
+                if hasattr(video, 'section') and video.section:
+                    await video.fetch_all_links()
+            except Exception as e:
+                # Log the error but continue with the video as-is
+                # The Link might not be fetchable if the section was deleted
+                logger.warning(f"Failed to fetch links for video {video.id}: {str(e)}")
+                # If section link can't be fetched, we'll return it as a Link reference
+                # Beanie/Pydantic should handle Link serialization automatically
 
-    return videos
+        return videos
+    except Exception as e:
+        logger.error(f"Error fetching videos for section {actual_section_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "DatabaseError", "message": f"Failed to fetch videos: {str(e)}"}
+        )
 
 
 @router.get("/stream/{video_id}")
