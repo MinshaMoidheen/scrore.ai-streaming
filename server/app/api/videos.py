@@ -28,8 +28,10 @@ async def list_recorded_videos(
     """
     List recorded videos for a specific section with date filtering and pagination.
     """
+    # Find section and exclude soft-deleted ones
     section = await Section.get(section_id)
-    if not section:
+    print("section", section)
+    if not section or section.is_deleted.status:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Section not found"
         )
