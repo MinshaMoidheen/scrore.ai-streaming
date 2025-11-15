@@ -104,12 +104,34 @@ app.include_router(auth.router)
 # Mount videos_recorded folder as static files
 # This allows direct access to videos via /videos_recorded/{filename}
 # The path matches the internal path used in the streaming route
-videos_dir = os.path.join(os.getcwd(), "videos_recorded")
+# videos_recorded folder is at the same level as the server folder
+# Get the absolute path: go up from server/app/main.py to server, then up to root, then videos_recorded
+def get_videos_dir():
+    """Get the absolute path to the videos_recorded directory.
+    Checks project root (same level as server folder) first, then current working directory.
+    """
+    # Try project root first (same level as server folder)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Goes to server/
+    project_root = os.path.dirname(base_dir)  # Goes up to project root
+    videos_dir = os.path.join(project_root, "videos_recorded")
+    
+    if os.path.exists(videos_dir):
+        return os.path.abspath(videos_dir)
+    
+    # Fallback: check current working directory
+    videos_dir_cwd = os.path.join(os.getcwd(), "videos_recorded")
+    if os.path.exists(videos_dir_cwd):
+        return os.path.abspath(videos_dir_cwd)
+    
+    # If neither exists, return the project root path (will be created if needed)
+    return os.path.abspath(videos_dir)
+
+videos_dir = get_videos_dir()
 if os.path.exists(videos_dir):
     app.mount("/videos_recorded", StaticFiles(directory=videos_dir), name="videos_recorded")
-    logger.info(f"Mounted videos_recorded folder as static files at /videos_recorded")
+    logger.info(f"Mounted videos_recorded folder as static files at /videos_recorded from: {videos_dir}")
 else:
-    logger.warning(f"videos_recorded directory does not exist: {videos_dir}")
+    logger.warning(f"videos_recorded directory does not exist. Checked: {videos_dir}")
 
 
 

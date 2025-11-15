@@ -406,7 +406,22 @@ async def start_recording_endpoint(
         if not section:
             logger.info(f"Recording allowed for section {section_id} without section validation (section may not exist in streaming server DB)")
 
-        videos_dir = "videos_recorded"
+        # Get videos directory path (same logic as in main.py and videos.py)
+        # Try project root first (same level as server folder)
+        # From server/app/api/recording.py: go up 3 levels to get to server/, then 1 more to project root
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # Goes to server/
+        project_root = os.path.dirname(base_dir)  # Goes up to project root
+        videos_dir = os.path.join(project_root, "videos_recorded")
+        
+        # Fallback: check current working directory
+        if not os.path.exists(videos_dir):
+            videos_dir_cwd = os.path.join(os.getcwd(), "videos_recorded")
+            if os.path.exists(videos_dir_cwd):
+                videos_dir = videos_dir_cwd
+            else:
+                # Use project root path and create it
+                videos_dir = os.path.join(project_root, "videos_recorded")
+        
         os.makedirs(videos_dir, exist_ok=True)
 
         session_id = str(uuid.uuid4())

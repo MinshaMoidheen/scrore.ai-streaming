@@ -15,6 +15,28 @@ from app.db_models.user import User
 
 logger = logging.getLogger(__name__)
 
+
+def get_videos_dir():
+    """Get the absolute path to the videos_recorded directory.
+    Checks project root (same level as server folder) first, then current working directory.
+    """
+    # Try project root first (same level as server folder)
+    # From server/app/api/videos.py: go up 3 levels to get to server/, then 1 more to project root
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # Goes to server/
+    project_root = os.path.dirname(base_dir)  # Goes up to project root
+    videos_dir = os.path.join(project_root, "videos_recorded")
+    
+    if os.path.exists(videos_dir):
+        return os.path.abspath(videos_dir)
+    
+    # Fallback: check current working directory
+    videos_dir_cwd = os.path.join(os.getcwd(), "videos_recorded")
+    if os.path.exists(videos_dir_cwd):
+        return os.path.abspath(videos_dir_cwd)
+    
+    # If neither exists, return the project root path (will be created if needed)
+    return os.path.abspath(videos_dir)
+
 router = APIRouter(prefix="/videos", tags=["Videos"])
 
 
@@ -121,7 +143,8 @@ async def stream_video(
         # This would need additional logic to determine ownership
         pass
 
-    video_path = os.path.join("videos_recorded", video.filename)
+    videos_dir = get_videos_dir()
+    video_path = os.path.join(videos_dir, video.filename)
     if not os.path.exists(video_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found"
