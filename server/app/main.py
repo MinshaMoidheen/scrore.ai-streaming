@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, Response
 from app.api import websocket, recording, meetings, videos, auth
 import logging
+import os
 
 from app.config.lifespan import lifespan
 from app.config.origins import origins
@@ -99,6 +100,16 @@ app.include_router(recording.router)
 app.include_router(meetings.router, prefix="/api")
 app.include_router(videos.router, prefix="/api")
 app.include_router(auth.router)
+
+# Mount videos_recorded folder as static files
+# This allows direct access to videos via /videos_recorded/{filename}
+# The path matches the internal path used in the streaming route
+videos_dir = os.path.join(os.getcwd(), "videos_recorded")
+if os.path.exists(videos_dir):
+    app.mount("/videos_recorded", StaticFiles(directory=videos_dir), name="videos_recorded")
+    logger.info(f"Mounted videos_recorded folder as static files at /videos_recorded")
+else:
+    logger.warning(f"videos_recorded directory does not exist: {videos_dir}")
 
 
 

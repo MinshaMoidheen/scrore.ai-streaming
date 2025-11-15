@@ -28,7 +28,7 @@ sessions: Dict[str, "RecordingSession"] = {}
 class WebMMediaRecorder:
     """
     Custom MediaRecorder for WebM format with proper codecs:
-    - Video: VP9 (libvpx-vp9) - High quality codec
+    - Video: VP8 (libvpx) - High quality, reliable codec
     - Audio: Opus (libopus) - High quality audio
     """
     
@@ -58,8 +58,9 @@ class WebMMediaRecorder:
             codec_name = "libopus"
             stream = cast(av.AudioStream, self.__container.add_stream(codec_name))
         else:
-            # Use VP9 codec for WebM video - better quality than VP8
-            codec_name = "libvpx-vp9"
+            # Use VP8 codec for WebM video - more reliable and compatible than VP9
+            # VP9 can have issues with incomplete recordings, VP8 is more stable
+            codec_name = "libvpx"
             stream = cast(av.VideoStream, self.__container.add_stream(codec_name, rate=30))
             stream.pix_fmt = "yuv420p"
         
@@ -75,27 +76,51 @@ class WebMMediaRecorder:
     
     async def stop(self) -> None:
         """Stop recording and finalize file."""
-        if self.__container is not None:
-            logger.info("Stopping WebM MediaRecorder and finalizing file...")
-            for track, context in self.__tracks.items():
-                if context.task is not None:
-                    context.task.cancel()
-                    try:
-                        await context.task
-                    except asyncio.CancelledError:
-                        pass
-                    context.task = None
-                    # Flush remaining frames
-                    try:
-                        for packet in context.stream.encode(None):
-                            self.__container.mux(packet)
-                    except Exception as e:
-                        logger.warning(f"Error flushing {track.kind} stream: {e}")
+        if self.__container is None:
+            logger.warning("WebM MediaRecorder container is already closed")
+            return
             
-            self.__tracks = {}
+        logger.info("Stopping WebM MediaRecorder and finalizing file...")
+        
+        # First, signal tracks to stop by canceling their tasks
+        # But wait a bit for any in-flight frames to complete
+        for track, context in list(self.__tracks.items()):
+            if context.task is not None and not context.task.done():
+                # Give tasks a moment to finish current frame processing
+                await asyncio.sleep(0.1)
+                context.task.cancel()
+                try:
+                    # Wait for task to finish cancellation
+                    await asyncio.wait_for(context.task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                context.task = None
+        
+        # Now flush all remaining frames from each stream
+        logger.info("Flushing remaining frames from all streams...")
+        for track, context in list(self.__tracks.items()):
+            try:
+                # Flush encoder - encode(None) flushes all buffered frames
+                flush_count = 0
+                for packet in context.stream.encode(None):
+                    self.__container.mux(packet)
+                    flush_count += 1
+                if flush_count > 0:
+                    logger.info(f"Flushed {flush_count} packets from {track.kind} stream")
+            except Exception as e:
+                logger.error(f"Error flushing {track.kind} stream: {e}", exc_info=True)
+        
+        # Clear tracks
+        self.__tracks = {}
+        
+        # Close container - this finalizes the file
+        try:
             self.__container.close()
+            logger.info(f"WebM MediaRecorder container closed. File should be saved to: {self.file_path}")
+        except Exception as e:
+            logger.error(f"Error closing container: {e}", exc_info=True)
+        finally:
             self.__container = None
-            logger.info(f"WebM MediaRecorder stopped. File saved to: {self.file_path}")
     
     async def __run_track(
         self, track: MediaStreamTrack, context: "WebMMediaRecorder.MediaRecorderContext"
@@ -123,10 +148,16 @@ class WebMMediaRecorder:
                 
                 # Encode and mux frames
                 try:
-                    for packet in context.stream.encode(frame):
-                        self.__container.mux(packet)
+                    packets = context.stream.encode(frame)
+                    for packet in packets:
+                        try:
+                            self.__container.mux(packet)
+                        except Exception as mux_error:
+                            logger.error(f"Error muxing {track.kind} packet: {mux_error}", exc_info=True)
+                            # Continue processing other packets even if one fails
                 except Exception as e:
                     logger.error(f"Error encoding {track.kind} frame: {e}", exc_info=True)
+                    # Continue processing - don't stop on single frame error
         except Exception as e:
             logger.error(f"Error in track processing: {e}", exc_info=True)
 
@@ -216,16 +247,17 @@ class RecordingSession:
         # Initialize audio mixer with existing tracks (could be empty initially)
         self.audio_mixer = AudioMixerTrack(tracks=self.audio_tracks.copy())
 
-        # WebM encoding options for high quality VP9/Opus
-        # VP9 quality: CRF 0-63 (lower = better, 15-25 is high quality range)
-        # For maximum quality: use CRF 15 with high bitrate cap
+        # WebM encoding options for high quality VP8/Opus
+        # VP8 quality: CRF 4-63 (lower = better, 10-20 is high quality range)
+        # Using VP8 instead of VP9 for better reliability and compatibility
         options = {
-            "crf": "15",  # Very high quality (0-63 scale, lower is better)
-            "b:v": "10M",  # High video bitrate cap for excellent quality
-            "maxrate": "12M",  # Maximum bitrate for quality spikes
-            "bufsize": "20M",  # Buffer size for rate control
+            "crf": "10",  # High quality (4-63 scale, lower is better, 10 is very high quality)
+            "b:v": "8M",  # High video bitrate for excellent quality
+            "maxrate": "10M",  # Maximum bitrate for quality spikes
+            "bufsize": "16M",  # Buffer size for rate control
             "b:a": "256k",  # High audio bitrate for excellent quality
             "threads": "0",  # Auto-detect optimal thread count
+            "deadline": "good",  # VP8 encoding quality (good/best/realtime)
         }
         self.recorder = WebMMediaRecorder(self.file_path, options=options)
 
@@ -274,21 +306,30 @@ class RecordingSession:
         if self.session_id in sessions:
             del sessions[self.session_id]
 
-        tasks = []
+        # Execute stop tasks sequentially to ensure proper order
+        # Stop recorder first, then compositor, then close connection
         if self.recorder and (self.__recorder_started or hasattr(self, '_recorder_started')):
             logger.info(f"Stopping media recorder for session {self.session_id}...")
-            tasks.append(self.recorder.stop())
-
-        if self.compositor:
-            tasks.append(self.compositor.stop())
-
-        logger.info(f"Closing peer connection for session {self.session_id}...")
-        tasks.append(self.pc.close())
-
-        await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await self.recorder.stop()
+                logger.info(f"Recorder stopped for session {self.session_id}")
+            except Exception as e:
+                logger.error(f"Error stopping recorder: {e}", exc_info=True)
         
-        # Wait a moment for file to be fully written
-        await asyncio.sleep(0.5)
+        if self.compositor:
+            try:
+                await self.compositor.stop()
+            except Exception as e:
+                logger.error(f"Error stopping compositor: {e}", exc_info=True)
+        
+        try:
+            await self.pc.close()
+            logger.info(f"Peer connection closed for session {self.session_id}")
+        except Exception as e:
+            logger.error(f"Error closing peer connection: {e}", exc_info=True)
+        
+        # Wait longer for file to be fully written and flushed to disk
+        await asyncio.sleep(1.0)
         
         # Save the recorded video to database after recording is stopped
         try:
