@@ -12,6 +12,7 @@ from jose import JWTError, jwt, ExpiredSignatureError
 from app.config.env_settings import settings
 from app.db_models.core import Role
 from app.db_models.user import User
+from app.db_models.student import Student
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,24 @@ def create_access_token(user_id: str):
 def create_refresh_token(user_id: str):
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {"userId": user_id, "exp": expire, "sub": "refreshToken"}
+    encoded_jwt = jwt.encode(
+        to_encode, settings.JWT_REFRESH_SECRET, algorithm=ALGORITHM
+    )
+    return encoded_jwt
+
+
+def create_student_access_token(student_id: str):
+    """Create an access token for a student."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode = {"userId": student_id, "type": "student", "exp": expire, "sub": "access"}
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+def create_student_refresh_token(student_id: str):
+    """Create a refresh token for a student."""
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode = {"userId": student_id, "type": "student", "exp": expire, "sub": "refreshToken"}
     encoded_jwt = jwt.encode(
         to_encode, settings.JWT_REFRESH_SECRET, algorithm=ALGORITHM
     )
@@ -173,3 +192,103 @@ def authorize(roles: list[Role]):
         return user
 
     return get_current_user
+
+
+async def authenticate_student(token: Optional[str]) -> PydanticObjectId:
+    """Authenticate a student token and return the student ID."""
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "AuthenticationError",
+                "message": "Access denied, no token provided",
+            },
+        )
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[ALGORITHM])
+        student_id: str = payload.get("userId")
+        token_type: str = payload.get("type")
+        subject: str = payload.get("sub")
+
+        logger.info(f"Student token decoded successfully. userId: {student_id}, type: {token_type}, subject: {subject}")
+
+        if student_id is None:
+            logger.error("Token payload missing userId")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "AuthenticationError", "message": "Access token invalid: missing userId"},
+            )
+        
+        if token_type != "student":
+            logger.error(f"Token type mismatch. Expected 'student', got '{token_type}'")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "AuthenticationError", "message": f"Access token invalid: type must be 'student', got '{token_type}'"},
+            )
+        
+        if subject != "access":
+            logger.error(f"Token subject mismatch. Expected 'access', got '{subject}'")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "AuthenticationError", "message": f"Access token invalid: subject must be 'access', got '{subject}'"},
+            )
+
+        return PydanticObjectId(student_id)
+    except ExpiredSignatureError:
+        logger.warning("Student token has expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "AuthenticationError",
+                "message": "Access token has expired, request a new one with refresh token",
+            },
+        ) from None
+    except JWTError as e:
+        logger.error(f"JWT decode error for student token: {str(e)}. JWT_SECRET configured: {bool(settings.JWT_SECRET)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "AuthenticationError", "message": f"Access token invalid: {str(e)}"},
+        ) from None
+
+
+def authorize_student():
+    """Dependency function to authorize and return the current student."""
+    async def get_current_student(
+        token: Annotated[Optional[str], Depends(oauth2_scheme)]
+    ) -> Student:
+        student_id = await authenticate_student(token)
+        student = None
+        try:
+            student = await Student.get(student_id)
+            if student:
+                logger.info(f"Student {student_id} found in database")
+            else:
+                logger.warning(f"Student {student_id} not found in database")
+        except Exception as e:
+            error_msg = str(e) if e else "Unknown error"
+            error_type = type(e).__name__
+            logger.error(f"Student {student_id} not found in database (exception {error_type}): {error_msg}")
+            student = None
+        
+        if not student:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "AuthenticationError",
+                    "message": "Student not found",
+                },
+            )
+        
+        # Check if student is soft-deleted
+        if student.is_deleted and student.is_deleted.status:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "AuthenticationError",
+                    "message": "Student account has been deleted",
+                },
+            )
+        
+        return student
+
+    return get_current_student
