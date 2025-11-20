@@ -10,6 +10,7 @@ from app.db_models import (
     CourseClass,
     RecordedVideo,
     Student,
+    Meeting,
 )
 
 if not settings.MONGO_URI:
@@ -36,5 +37,6 @@ async def init_db():
             Section,
             RecordedVideo,
             Student,
+            Meeting,
         ]
     )

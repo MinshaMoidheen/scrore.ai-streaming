@@ -7,6 +7,7 @@ from .token import Token
 from .attendance import Schedule, Attendance, AttendanceRecord
 from .recording import RecordedVideo
 from .student import Student
+from .meeting import Meeting
 
 # A list of all model classes for easier management
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "AttendanceRecord",
     "RecordedVideo",
     "Student",
+    "Meeting",
     "SoftDelete",
     "Role",
     "Access",
@@ -40,3 +42,4 @@ Attendance.model_rebuild()
 AttendanceRecord.model_rebuild()
 RecordedVideo.model_rebuild()
 Student.model_rebuild()
+Meeting.model_rebuild()
