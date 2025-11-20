@@ -166,7 +166,7 @@ class AudioMixerTrack(MediaStreamTrack):
             logger.warning(f"No live audio tracks available out of {len(self.tracks)} total tracks")
             # Generate silence and return early
             final_frame_s16 = np.zeros((2, self.SAMPLES_PER_FRAME), dtype=np.int16)
-            output_frame = AudioFrame.from_ndarray(final_frame_s16, format="s16", layout="stereo")
+            output_frame = AudioFrame.from_ndarray(final_frame_s16.T, format="s16", layout="stereo")
             output_frame.pts = self._next_pts
             output_frame.sample_rate = self.SAMPLE_RATE
             output_frame.time_base = self.TIME_BASE
@@ -257,7 +257,7 @@ class AudioMixerTrack(MediaStreamTrack):
             final_frame_s16 = np.clip(mixed_frame_i32, -32768, 32767).astype(np.int16)
             logger.info(f"Successfully mixed audio from {contributors} contributors")
 
-        output_frame = AudioFrame.from_ndarray(final_frame_s16, format="s16", layout="stereo")
+        output_frame = AudioFrame.from_ndarray(final_frame_s16.T, format="s16", layout="stereo")
 
         # 5. Set a reliable timestamp and enforce the pacemaker rhythm
         output_frame.pts = self._next_pts

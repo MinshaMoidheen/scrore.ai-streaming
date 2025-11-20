@@ -10,12 +10,14 @@ class Room:
         self.host_id = host_id  # Only teachers can be hosts
         self.participants: Dict[str, WebSocket] = {}
         self.participant_types: Dict[str, ParticipantType] = {}  # Track participant types
+        self.participant_usernames: Dict[str, str] = {}  # Track participant usernames
 
     async def add_participant(
-        self, participant_id: str, websocket: WebSocket, participant_type: ParticipantType
+        self, participant_id: str, websocket: WebSocket, participant_type: ParticipantType, username: str
     ):
         self.participants[participant_id] = websocket
         self.participant_types[participant_id] = participant_type
+        self.participant_usernames[participant_id] = username
         
         # If this is the first teacher and no host is set, make them the host
         if participant_type == "teacher" and self.host_id is None:
@@ -25,6 +27,7 @@ class Room:
             "type": "new_participant",
             "participant_id": participant_id,
             "participant_type": participant_type,
+            "username": username,
             "is_host": participant_id == self.host_id
         }), exclude_id=participant_id)
 
@@ -32,9 +35,12 @@ class Room:
         if participant_id in self.participants:
             was_host = participant_id == self.host_id
             participant_type = self.participant_types.get(participant_id)
+            username = self.participant_usernames.get(participant_id)
             del self.participants[participant_id]
             if participant_id in self.participant_types:
                 del self.participant_types[participant_id]
+            if participant_id in self.participant_usernames:
+                del self.participant_usernames[participant_id]
             
             # If the host left, assign a new host from remaining teachers
             if was_host and self.host_id == participant_id:
@@ -57,6 +63,7 @@ class Room:
                 "type": "participant_left",
                 "participant_id": participant_id,
                 "participant_type": participant_type,
+                "username": username,
                 "was_host": was_host
             }))
 
@@ -85,6 +92,7 @@ class MeetingManager:
         self,
         room_id: str,
         participant_id: str,
+        username: str,
         websocket: WebSocket,
         participant_type: ParticipantType,
     ):
@@ -94,6 +102,7 @@ class MeetingManager:
         Args:
             room_id: The room identifier
             participant_id: Unique identifier for the participant
+            username: Username of the participant
             websocket: WebSocket connection (must be already accepted)
             participant_type: "teacher" or "student"
         """
@@ -108,10 +117,11 @@ class MeetingManager:
             "type": "assign_id",
             "id": participant_id,
             "participant_type": participant_type,
+            "username": username,
             "is_host": is_host
         }))
 
-        await room.add_participant(participant_id, websocket, participant_type)
+        await room.add_participant(participant_id, websocket, participant_type, username)
 
         # Send list of existing participants to the new participant
         # Exclude the newly joined participant from the list
@@ -124,6 +134,7 @@ class MeetingManager:
             {
                 "id": pid,
                 "type": room.participant_types.get(pid, "unknown"),
+                "username": room.participant_usernames.get(pid, ""),
                 "is_host": pid == room.host_id
             }
             for pid in participant_ids

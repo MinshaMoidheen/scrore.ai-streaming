@@ -69,6 +69,7 @@ async def websocket_endpoint(
     """
     participant_id = None
     participant_type = None
+    username = None
     
     # Accept the WebSocket connection first (required before any operations)
     await websocket.accept()
@@ -90,8 +91,9 @@ async def websocket_endpoint(
             # Check if user is a teacher
             if user.role == Role.TEACHER:
                 participant_id = str(user.id)
+                username = user.username
                 participant_type = "teacher"
-                logger.info(f"Teacher {participant_id} connecting to room {room_id}")
+                logger.info(f"Teacher {participant_id}, {username} connecting to room {room_id}")
             else:
                 # Non-teacher users are not allowed in meetings
                 raise HTTPException(
@@ -116,11 +118,12 @@ async def websocket_endpoint(
                 )
             
             participant_id = str(student.id)
+            username = student.username
             participant_type = "student"
-            logger.info(f"Student {participant_id} connecting to room {room_id}")
+            logger.info(f"Student {participant_id}, {username} connecting to room {room_id}")
         
         # Connect to meeting
-        await manager.handle_connect(room_id, participant_id, websocket, participant_type)
+        await manager.handle_connect(room_id, participant_id, username, websocket, participant_type)
         
         try:
             while True:
