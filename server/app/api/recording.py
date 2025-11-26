@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException, Depends
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, MediaStreamError
 from aiortc.contrib.media import MediaRecorder
-from ..api.resizing import AspectRatioPreservingTrack
-from ..api.compositing import CompositingTrack, AudioMixerTrack
+from ..api.compositing import AudioMixerTrack
 import uuid
 import os
 import asyncio
@@ -42,12 +41,16 @@ class WebMMediaRecorder:
         self.file_path = file_path
         self.options = options or {}
         
-        # Open WebM container
+        # Open WebM container with only format options
+        # Filter out codec options that might confuse the container muxer
+        container_options = {k: v for k, v in self.options.items() 
+                           if k not in ["crf", "b:v", "maxrate", "bufsize", "b:a", "threads", "deadline", "cpu-used"]}
+        
         self.__container = av.open(
             file=file_path,
             format="webm",
             mode="w",
-            options=self.options
+            options=container_options
         )
         self.__tracks: Dict[MediaStreamTrack, WebMMediaRecorder.MediaRecorderContext] = {}
     
@@ -57,12 +60,24 @@ class WebMMediaRecorder:
             # Use Opus codec for WebM audio - high quality
             codec_name = "libopus"
             stream = cast(av.AudioStream, self.__container.add_stream(codec_name))
+            # Apply audio options
+            if "b:a" in self.options:
+                stream.options = {"b": self.options["b:a"]}
         else:
-            # Use VP8 codec for WebM video - more reliable and compatible than VP9
-            # VP9 can have issues with incomplete recordings, VP8 is more stable
+            # Use VP8 codec for WebM video
             codec_name = "libvpx"
             stream = cast(av.VideoStream, self.__container.add_stream(codec_name, rate=30))
             stream.pix_fmt = "yuv420p"
+            # Apply video options
+            video_opts = {}
+            if "crf" in self.options: video_opts["crf"] = self.options["crf"]
+            if "b:v" in self.options: video_opts["b"] = self.options["b:v"]
+            if "maxrate" in self.options: video_opts["maxrate"] = self.options["maxrate"]
+            if "bufsize" in self.options: video_opts["bufsize"] = self.options["bufsize"]
+            if "threads" in self.options: video_opts["threads"] = self.options["threads"]
+            if "deadline" in self.options: video_opts["deadline"] = self.options["deadline"]
+            
+            stream.options = video_opts
         
         self.__tracks[track] = self.MediaRecorderContext(stream)
         logger.info(f"Added {track.kind} track to WebM recorder with codec: {codec_name}")
@@ -171,7 +186,7 @@ class RecordingSession:
         self.section_id = section_id
         self.video_tracks: Dict[str, MediaStreamTrack] = {}
         self.audio_tracks: Set[MediaStreamTrack] = set()
-        self.compositor: Optional[CompositingTrack] = None
+        # self.compositor removed to reduce processing latency
         self.audio_mixer: Optional[AudioMixerTrack] = None
         self.__recorder_started = False
         self.__stopped = False
@@ -214,7 +229,8 @@ class RecordingSession:
             if track.kind == "video":
                 if not self.video_tracks.get("main"):
                     logger.info("Received video track for recording (screen share).")
-                    self.video_tracks["main"] = AspectRatioPreservingTrack(track)
+                    # Use track directly without resizing to reduce latency
+                    self.video_tracks["main"] = track
                 else:
                     logger.warning(
                         "A second video track was received for recording. It will be ignored."
@@ -240,9 +256,8 @@ class RecordingSession:
         )
         self.__recorder_started = True
 
-        self.compositor = CompositingTrack(
-            main_track=self.video_tracks.get("main"),
-        )
+        # Use video track directly without compositing to reduce latency
+        video_track = self.video_tracks.get("main")
         
         # Initialize audio mixer with existing tracks (could be empty initially)
         self.audio_mixer = AudioMixerTrack(tracks=self.audio_tracks.copy())
@@ -251,17 +266,18 @@ class RecordingSession:
         # VP8 quality: CRF 4-63 (lower = better, 10-20 is high quality range)
         # Using VP8 instead of VP9 for better reliability and compatibility
         options = {
-            "crf": "10",  # High quality (4-63 scale, lower is better, 10 is very high quality)
-            "b:v": "8M",  # High video bitrate for excellent quality
-            "maxrate": "10M",  # Maximum bitrate for quality spikes
-            "bufsize": "16M",  # Buffer size for rate control
-            "b:a": "256k",  # High audio bitrate for excellent quality
-            "threads": "0",  # Auto-detect optimal thread count
-            "deadline": "good",  # VP8 encoding quality (good/best/realtime)
+            "crf": "30",  # Changed from 10 to 30 for smoother performance
+            "b:v": "2500k",  # Changed from 8M to 2.5M (standard for 720p)
+            "maxrate": "3000k",  # Cap spikes at 3M
+            "bufsize": "6000k",  # Buffer 2x maxrate
+            "b:a": "128k",  # 128k is sufficient for Opus voice
+            "threads": "4",  # Use 4 threads explicitly
+            "deadline": "realtime",  # VP8 encoding quality (good/best/realtime) - realtime reduces latency
+            "cpu-used": "4", # Higher value = faster encoding (0-16 for VP8)
         }
         self.recorder = WebMMediaRecorder(self.file_path, options=options)
 
-        self.recorder.addTrack(self.compositor)
+        self.recorder.addTrack(video_track)
         self.recorder.addTrack(self.audio_mixer)
 
         # Don't start recorder immediately - wait for WebRTC connection
@@ -316,11 +332,7 @@ class RecordingSession:
             except Exception as e:
                 logger.error(f"Error stopping recorder: {e}", exc_info=True)
         
-        if self.compositor:
-            try:
-                await self.compositor.stop()
-            except Exception as e:
-                logger.error(f"Error stopping compositor: {e}", exc_info=True)
+        # Compositor removed
         
         try:
             await self.pc.close()

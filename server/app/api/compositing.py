@@ -246,18 +246,44 @@ class AudioMixerTrack(MediaStreamTrack):
         # 4. Create the final output frame (or silence)
         if mixed_frame_i32 is None or contributors == 0:
             # Generate silence if no audio was received
-            final_frame_s16 = np.zeros((2, self.SAMPLES_PER_FRAME), dtype=np.int16)
+            # For s16 packed, we want a flat buffer of (1, samples * channels)
+            # SAMPLES_PER_FRAME = 960, channels = 2 (stereo) => 1920 samples
+            final_frame_s16 = np.zeros((1, self.SAMPLES_PER_FRAME * 2), dtype=np.int16)
             if len(live_tracks) > 0:
                 logger.warning(f"Generating silence despite having {len(live_tracks)} live audio tracks available")
+            
+            output_frame = AudioFrame.from_ndarray(final_frame_s16, format="s16", layout="stereo")
         else:
             # Average the signal to prevent clipping
             if contributors > 1:
                 mixed_frame_i32 //= contributors
+            
             # Clip to 16-bit range
-            final_frame_s16 = np.clip(mixed_frame_i32, -32768, 32767).astype(np.int16)
+            clipped = np.clip(mixed_frame_i32, -32768, 32767).astype(np.int16)
+            
+            # Ensure we have the correct shape for s16 packed
+            # If mixed_frame_i32 came from (samples, channels) or (channels, samples), we need to flatten it to (1, total_samples)
+            # PyAV's to_ndarray for s16 typically returns (1, 1920) for stereo 960 samples.
+            
+            if clipped.ndim == 2:
+                # Flatten to (1, total_samples)
+                # We assume interleaved data is desired for packed formats.
+                # If input was (2, 960), we need to transpose to (960, 2) then flatten.
+                if clipped.shape[0] == 2 and clipped.shape[1] == self.SAMPLES_PER_FRAME:
+                     # Planar-like shape (2, 960) -> Interleave
+                     interleaved = clipped.T.flatten().reshape(1, -1)
+                elif clipped.shape[0] == 1:
+                     # Already (1, 1920) or similar
+                     interleaved = clipped
+                else:
+                     # Maybe (960, 2)? -> Flatten
+                     interleaved = clipped.flatten().reshape(1, -1)
+            else:
+                # 1D array -> reshape to (1, total)
+                interleaved = clipped.reshape(1, -1)
+            
             logger.info(f"Successfully mixed audio from {contributors} contributors")
-
-        output_frame = AudioFrame.from_ndarray(final_frame_s16.T, format="s16", layout="stereo")
+            output_frame = AudioFrame.from_ndarray(interleaved, format="s16", layout="stereo")
 
         # 5. Set a reliable timestamp and enforce the pacemaker rhythm
         output_frame.pts = self._next_pts
